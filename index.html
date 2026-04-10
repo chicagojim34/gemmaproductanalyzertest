@@ -55,7 +55,10 @@
                         throw new Error("WebGPU not supported. Use Chrome on a flagship mobile device (Pixel 8+, S24+, iPhone 15 Pro+).");
                     }
 
-                    const genai = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-genai@latest');
+                    // WORKAROUND: Hide the dynamic import from Babel so it doesn't convert it to a Node.js 'require'
+                    const dynamicImport = new Function('url', 'return import(url)');
+                    const genai = await dynamicImport('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-genai@latest');
+                    
                     const { LlmInference, FilesetResolver } = genai;
                     
                     const genAiFileset = await FilesetResolver.forGenAiTasks(
