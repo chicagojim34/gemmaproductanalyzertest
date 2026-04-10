@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vision Edge - Gemma 4 E4B</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Import React 18 -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Import Babel for JSX parsing -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: black; color: white; margin: 0; }
+        .animate-in { animation: fadeIn 0.5s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+
+        // Inline SVG Components to replace external Lucide dependency and fix the forwardRef/undefined errors
+        const Icon = ({ children, size = 24, className = "" }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
+        );
+
+        const Zap = (props) => <Icon {...props}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></Icon>;
+        const Camera = (props) => <Icon {...props}><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></Icon>;
+        const Package = (props) => <Icon {...props}><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22.5V12"/></Icon>;
+        const Sparkles = (props) => <Icon {...props}><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M3 5h4"/><path d="M21 17v4"/><path d="M19 19h4"/></Icon>;
+        const Loader2 = (props) => <Icon {...props} className={`animate-spin ${props.className}`}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></Icon>;
+        const Tag = (props) => <Icon {...props}><path d="M12.586 3a2 2 0 0 0-1.414.586l-7.172 7.172a2 2 0 0 0 0 2.828l6.414 6.414a2 2 0 0 0 2.828 0l7.172-7.172A2 2 0 0 0 21 11.414V5a2 2 0 0 0-2-2z"/><circle cx="15.5" cy="8.5" r=".5" fill="currentColor"/></Icon>;
+        const AlertCircle = (props) => <Icon {...props}><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></Icon>;
+
+        const App = () => {
+            const [modelStatus, setModelStatus] = useState('idle'); 
+            const [image, setImage] = useState(null);
+            const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [results, setResults] = useState([]);
+            const [error, setError] = useState(null);
+            
+            const llmInference = useRef(null);
+            const fileInputRef = useRef(null);
+
+            const initModel = async () => {
+                try {
+                    setModelStatus('loading');
+                    setError(null);
+
+                    if (!navigator.gpu) {
+                        throw new Error("WebGPU not supported. Use Chrome on a flagship mobile device (Pixel 8+, S24+, iPhone 15 Pro+).");
+                    }
+
+                    const genai = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-genai@latest');
+                    const { LlmInference, FilesetResolver } = genai;
+                    
+                    const genAiFileset = await FilesetResolver.forGenAiTasks(
+                        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-genai@latest/wasm"
+                    );
+
+                    llmInference.current = await LlmInference.createFromOptions(genAiFileset, {
+                        baseOptions: {
+                            modelAssetPath: "https://storage.googleapis.com/tfjs-models/edge-ai/gemma-4-e4b-it-gpu.task"
+                        },
+                        maxTokens: 512,
+                        topK: 40,
+                        temperature: 0.1, // Even lower for strictly structured product output
+                    });
+
+                    setModelStatus('ready');
+                } catch (err) {
+                    console.error(err);
+                    setError(err.message || "Failed to initialize model. Check your connection.");
+                    setModelStatus('error');
+                }
+            };
+
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (f) => setImage(f.target.result);
+                    reader.readAsDataURL(file);
+                    setResults([]);
+                }
+            };
+
+            const analyzeImage = async () => {
+                if (!llmInference.current || !image) return;
+                
+                setIsAnalyzing(true);
+                setResults([]);
+
+                try {
+                    const prompt = `[IMAGE] Analyze this image carefully. List commercial products. 
+                    Format strictly as JSON: [{"category": "...", "brand": "...", "desc": "3 word description"}]`;
+
+                    const response = await llmInference.current.generateResponse(prompt);
+                    
+                    try {
+                        const jsonMatch = response.match(/\[\s*\{.*\}\s*\]/s);
+                        const cleanJson = jsonMatch ? jsonMatch[0] : response;
+                        const parsed = JSON.parse(cleanJson);
+                        setResults(Array.isArray(parsed) ? parsed : [parsed]);
+                    } catch (e) {
+                        setResults([{ category: "Item", brand: "Unknown", desc: response.substring(0, 50) }]);
+                    }
+                } catch (err) {
+                    setError("Inference failed: " + err.message);
+                } finally {
+                    setIsAnalyzing(false);
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-black text-slate-100 p-6 font-sans">
+                    <div className="max-w-2xl mx-auto space-y-8">
+                        
+                        <header className="space-y-2">
+                            <div className="flex items-center gap-2 text-blue-400">
+                                <Zap size={24} className="fill-blue-400" />
+                                <h1 className="text-2xl font-black tracking-tighter italic uppercase">Vision Edge</h1>
+                            </div>
+                            <p className="text-slate-500 text-sm">Gemma 4 E4B Multimodal • On-Device</p>
+                        </header>
+
+                        {modelStatus !== 'ready' && (
+                            <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 text-center space-y-4">
+                                <div className="bg-blue-500/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
+                                    <Package className="text-blue-500" size={32} />
+                                </div>
+                                <div>
+                                    <h2 className="text-lg font-bold">Ready to Load</h2>
+                                    <p className="text-slate-400 text-sm px-4">Download ~2.5GB Gemma weights to browser cache.</p>
+                                </div>
+                                <button 
+                                    onClick={initModel}
+                                    disabled={modelStatus === 'loading'}
+                                    className="w-full py-4 bg-white text-black font-bold rounded-2xl hover:bg-slate-200 transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
+                                >
+                                    {modelStatus === 'loading' ? <Loader2 size={20} /> : <Sparkles size={18} />}
+                                    {modelStatus === 'loading' ? "Loading..." : "Load Gemma 4 E4B"}
+                                </button>
+                                {error && (
+                                    <div className="p-3 bg-red-900/20 border border-red-900/50 rounded-xl flex items-center gap-2 text-red-400 text-xs text-left">
+                                        <AlertCircle size={14} className="shrink-0" />
+                                        <span>{error}</span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {modelStatus === 'ready' && (
+                            <div className="space-y-6 animate-in">
+                                <div className="relative group cursor-pointer" onClick={() => !isAnalyzing && fileInputRef.current.click()}>
+                                    <div className={`aspect-square rounded-3xl border-2 border-dashed transition-all flex flex-col items-center justify-center overflow-hidden bg-slate-900/30 ${image ? 'border-blue-500' : 'border-slate-800 group-hover:border-slate-600'}`}>
+                                        {image ? (
+                                            <img src={image} className="w-full h-full object-cover" alt="Product" />
+                                        ) : (
+                                            <>
+                                                <Camera size={48} className="text-slate-700 mb-4" />
+                                                <p className="text-slate-500 font-medium tracking-tight">Tap to snap or upload</p>
+                                            </>
+                                        )}
+                                    </div>
+                                    <input type="file" ref={fileInputRef} onChange={handleImageUpload} className="hidden" accept="image/*" />
+                                </div>
+
+                                <button 
+                                    onClick={analyzeImage}
+                                    disabled={!image || isAnalyzing}
+                                    className={`w-full py-5 rounded-2xl font-black text-xl transition-all shadow-2xl ${
+                                        !image || isAnalyzing ? 'bg-slate-800 text-slate-600' : 'bg-blue-600 text-white shadow-blue-600/20 active:scale-95'
+                                    }`}
+                                >
+                                    {isAnalyzing ? (
+                                        <div className="flex items-center justify-center gap-2">
+                                            <Loader2 size={24} />
+                                            <span>THINKING...</span>
+                                        </div>
+                                    ) : "ANALYZE PRODUCTS"}
+                                </button>
+
+                                <div className="space-y-3">
+                                    {results.map((item, idx) => (
+                                        <div key={idx} className="bg-slate-900 p-5 rounded-2xl border border-slate-800 flex items-center gap-4 animate-in">
+                                            <div className="bg-blue-500/20 p-3 rounded-xl">
+                                                <Tag className="text-blue-500" size={20} />
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className="flex justify-between items-start">
+                                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{item.category}</span>
+                                                </div>
+                                                <h3 className="font-bold text-lg">{item.brand || "Unknown"}</h3>
+                                                <p className="text-slate-400 text-sm italic">"{item.desc}"</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        
+                        <footer className="text-center pb-12 text-[10px] text-slate-600 uppercase tracking-[3px] font-bold">
+                            Edge AI • Fully Private • Offline
+                        </footer>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
